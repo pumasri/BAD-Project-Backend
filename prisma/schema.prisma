@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -10,4 +5,92 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum RoleName {
+  STUDENT
+  STAFF
+  ADMIN
+}
+
+enum ReportType {
+  LOST
+  FOUND
+}
+
+enum ReportStatus {
+  OPEN
+  MATCHED
+  CLAIM_IN_PROGRESS
+  RESOLVED
+  DONATED
+  DISPOSED
+  ARCHIVED
+}
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      RoleName @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  universityId String?  @unique
+  displayName  String
+  microsoftOid String?  @unique
+  passwordHash String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  roleId String @db.Uuid
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  itemReports ItemReport[]
+
+  @@index([roleId])
+}
+
+model ItemCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  itemReports ItemReport[]
+}
+
+model ItemReport {
+  id          String       @id @default(uuid()) @db.Uuid
+  title       String
+  description String       @db.Text
+  reportType  ReportType
+  status      ReportStatus @default(OPEN)
+  location    String
+  occurredAt  DateTime
+  reportedAt  DateTime     @default(now())
+  color       String?
+  brand       String?
+  isPublic    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  createdById String @db.Uuid
+  categoryId  String @db.Uuid
+
+  createdBy User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  category  ItemCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([createdById])
+  @@index([categoryId])
+  @@index([reportType, status])
+  @@index([location])
+  @@index([occurredAt])
 }
