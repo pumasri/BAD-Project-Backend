@@ -31,6 +31,13 @@ enum ReportStatus {
   ARCHIVED
 }
 
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  MORE_INFORMATION_REQUIRED
+}
+
 model Role {
   id        String   @id @default(uuid()) @db.Uuid
   name      RoleName @unique
@@ -41,20 +48,24 @@ model Role {
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  universityId String?  @unique
-  displayName  String
-  microsoftOid String?  @unique
-  passwordHash String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String   @id @default(uuid()) @db.Uuid
+  universityEmail   String   @unique @map("email")
+  username          String?  @unique
+  universityId      String?  @unique
+  fullName          String   @map("displayName")
+  microsoftObjectId String?  @unique @map("microsoftOid")
+  passwordHash      String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   roleId String @db.Uuid
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
-  itemReports ItemReport[]
+  itemReports     ItemReport[]
+  submittedClaims ClaimRequest[] @relation("ClaimantClaims")
+  reviewedClaims  ClaimRequest[] @relation("ReviewerClaims")
+  auditLogs       AuditLog[]
 
   @@index([roleId])
 }
@@ -91,9 +102,109 @@ model ItemReport {
   createdBy User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
   category  ItemCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
+  images                ItemImage[]
+  lostMatchSuggestions  MatchSuggestion[] @relation("LostReportMatches")
+  foundMatchSuggestions MatchSuggestion[] @relation("FoundReportMatches")
+  claims                ClaimRequest[]
+
   @@index([createdById])
   @@index([categoryId])
   @@index([reportType, status])
   @@index([location])
   @@index([occurredAt])
+}
+
+model ItemImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  objectKey String   @unique
+  mimeType  String
+  fileSize  Int
+  createdAt DateTime @default(now())
+
+  reportId String     @db.Uuid
+  report   ItemReport @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([reportId])
+}
+
+model MatchSuggestion {
+  id              String   @id @default(uuid()) @db.Uuid
+  confidenceScore Float
+  matchSource     String
+  createdAt       DateTime @default(now())
+
+  lostReportId  String @db.Uuid
+  foundReportId String @db.Uuid
+
+  lostReport  ItemReport @relation("LostReportMatches", fields: [lostReportId], references: [id], onDelete: Restrict)
+  foundReport ItemReport @relation("FoundReportMatches", fields: [foundReportId], references: [id], onDelete: Restrict)
+
+  @@unique([lostReportId, foundReportId])
+  @@index([foundReportId])
+  @@index([confidenceScore])
+}
+
+model ClaimRequest {
+  id                 String      @id @default(uuid()) @db.Uuid
+  status             ClaimStatus @default(PENDING)
+  identifyingDetails String      @db.Text
+  reviewNote         String?     @db.Text
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  claimantUserId   String  @db.Uuid
+  foundReportId    String  @db.Uuid
+  reviewedByUserId String? @db.Uuid
+
+  claimant    User            @relation("ClaimantClaims", fields: [claimantUserId], references: [id], onDelete: Restrict)
+  foundReport ItemReport      @relation(fields: [foundReportId], references: [id], onDelete: Restrict)
+  reviewedBy  User?           @relation("ReviewerClaims", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+  evidence    ClaimEvidence[]
+
+  @@index([claimantUserId])
+  @@index([foundReportId, status])
+  @@index([reviewedByUserId])
+}
+
+model ClaimEvidence {
+  id           String   @id @default(uuid()) @db.Uuid
+  evidenceType String
+  textValue    String?  @db.Text
+  objectKey    String?  @unique
+  mimeType     String?
+  fileSize     Int?
+  createdAt    DateTime @default(now())
+
+  claimRequestId String       @db.Uuid
+  claimRequest   ClaimRequest @relation(fields: [claimRequestId], references: [id], onDelete: Restrict)
+
+  @@index([claimRequestId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  action     String
+  entityType String
+  entityId   String   @db.Uuid
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  actorUserId String @db.Uuid
+  actor       User   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+model PartnerClient {
+  id               String   @id @default(uuid()) @db.Uuid
+  name             String   @unique
+  description      String?
+  baseUrl          String
+  apiKeyIdentifier String   @unique
+  apiKeyHash       String
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
