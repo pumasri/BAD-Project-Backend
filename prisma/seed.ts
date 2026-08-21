@@ -17,6 +17,21 @@ const roleNames = [
   RoleName.ADMIN,
 ] as const;
 
+const categoryNames = [
+  "Wallet",
+  "Phone",
+  "Tablet",
+  "Laptop",
+  "ID Card",
+  "Keys",
+  "Bottle",
+  "Bag",
+  "Clothing",
+  "Accessories",
+  "Electronics",
+  "Other",
+] as const;
+
 async function main() {
   await Promise.all(
     roleNames.map((name) =>
@@ -28,12 +43,22 @@ async function main() {
     ),
   );
 
-  console.log("Seeded roles: STUDENT, STAFF, ADMIN");
+  await Promise.all(
+    categoryNames.map((name) =>
+      prisma.itemCategory.upsert({
+        where: { name },
+        update: {},
+        create: { name },
+      }),
+    ),
+  );
+
+  console.log("Seeded 3 roles and 12 item categories.");
 }
 
 main()
   .catch((error: unknown) => {
-    console.error("Role seeding failed:", error);
+    console.error("Database seeding failed:", error);
     process.exitCode = 1;
   })
   .finally(async () => {
