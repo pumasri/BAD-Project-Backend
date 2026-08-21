@@ -1,5 +1,8 @@
 generator client {
-  provider = "prisma-client"
+  // Compatibility choice for the current CommonJS backend on Node.js 20.19+.
+  // Revisit the newer `prisma-client` generator when the backend has a
+  // supported TypeScript/ESM build pipeline.
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
 }
 
