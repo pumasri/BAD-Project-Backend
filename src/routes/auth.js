@@ -14,6 +14,7 @@ const {
 } = require("../utils/password");
 const { createRateLimit } = require("../middleware/rateLimit");
 const { deliverPasswordReset } = require("../services/passwordResetDelivery");
+const { verifyMicrosoftIdentity } = require("../services/microsoftIdentity");
 
 const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
@@ -60,7 +61,18 @@ function createToken(user) {
   );
 }
 
-router.post("/login", loginRateLimit, async (req, res) => {
+function developmentOnly(req, res, next) {
+  if (process.env.NODE_ENV !== "development") {
+    return res.status(404).json({
+      success: false,
+      message: "Not found"
+    });
+  }
+
+  return next();
+}
+
+router.post("/login", developmentOnly, loginRateLimit, async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   const password = req.body?.password;
 
@@ -85,6 +97,88 @@ router.post("/login", loginRateLimit, async (req, res) => {
     return res.status(401).json({
       success: false,
       message: "Invalid email or password"
+    });
+  }
+
+  return res.status(200).json({
+    token: createToken(user),
+    user: safeUser(user)
+  });
+});
+
+router.post("/microsoft", loginRateLimit, async (req, res) => {
+  const idToken = typeof req.body?.idToken === "string" ? req.body.idToken : "";
+
+  if (!idToken || idToken.length > 20_000) {
+    return res.status(400).json({
+      success: false,
+      message: "Microsoft identity token is required"
+    });
+  }
+
+  let identity;
+  try {
+    identity = await verifyMicrosoftIdentity(idToken);
+  } catch (error) {
+    if (error.code === "MICROSOFT_AUTH_NOT_CONFIGURED") {
+      return res.status(503).json({
+        success: false,
+        message: "Microsoft authentication is not configured"
+      });
+    }
+    return res.status(401).json({
+      success: false,
+      message: "Microsoft authentication failed"
+    });
+  }
+
+  let user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { microsoftObjectId: identity.microsoftObjectId },
+        { universityEmail: { equals: identity.email, mode: "insensitive" } }
+      ]
+    },
+    include: { role: true }
+  });
+
+  if (!user) {
+    if (!isAuStudentEmail(identity.email)) {
+      return res.status(403).json({
+        success: false,
+        message: "This AU account has not been provisioned"
+      });
+    }
+
+    user = await prisma.user.create({
+      data: {
+        universityEmail: identity.email,
+        fullName: identity.name,
+        microsoftObjectId: identity.microsoftObjectId,
+        role: { connect: { name: "STUDENT" } }
+      },
+      include: { role: true }
+    });
+  } else if (
+    user.microsoftObjectId &&
+    user.microsoftObjectId !== identity.microsoftObjectId
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: "Microsoft authentication failed"
+    });
+  } else if (!user.microsoftObjectId) {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { microsoftObjectId: identity.microsoftObjectId },
+      include: { role: true }
+    });
+  }
+
+  if (!user.isActive) {
+    return res.status(403).json({
+      success: false,
+      message: "This account is inactive"
     });
   }
 

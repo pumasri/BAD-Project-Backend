@@ -6,12 +6,15 @@ const jwt = require("jsonwebtoken");
 
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
 process.env.JWT_SECRET = "test-secret-that-is-only-used-by-automated-tests";
+process.env.NODE_ENV = "development";
 
 let currentUser = null;
 let lastCreatedUserData = null;
 let lastFindFirstArgs = null;
 let resetTokens = [];
 let nextResetTokenId = 1;
+let microsoftIdentity = null;
+let microsoftIdentityError = null;
 
 function matchesResetToken(token, where = {}) {
   if (where.id && token.id !== where.id) return false;
@@ -26,6 +29,15 @@ const fakePrisma = {
   user: {
     findFirst: async (args) => {
       lastFindFirstArgs = args;
+      if (args?.where?.OR) {
+        if (!currentUser) return null;
+        const objectId = args.where.OR.find((condition) => condition.microsoftObjectId)?.microsoftObjectId;
+        const email = args.where.OR.find((condition) => condition.universityEmail)?.universityEmail?.equals;
+        return currentUser.microsoftObjectId === objectId ||
+          currentUser.universityEmail.toLowerCase() === email?.toLowerCase()
+          ? currentUser
+          : null;
+      }
       const requestedEmail = args?.where?.universityEmail?.equals;
       if (requestedEmail && currentUser?.universityEmail.toLowerCase() !== requestedEmail.toLowerCase()) {
         return null;
@@ -39,6 +51,7 @@ const fakePrisma = {
         id: "4d004819-cadd-4929-9d09-8c52ec81007d",
         universityEmail: data.universityEmail,
         fullName: data.fullName,
+        microsoftObjectId: data.microsoftObjectId || null,
         passwordHash: data.passwordHash,
         tokenVersion: 0,
         isActive: true,
@@ -49,6 +62,7 @@ const fakePrisma = {
     update: async ({ data }) => {
       if (data.passwordHash) currentUser.passwordHash = data.passwordHash;
       if (data.tokenVersion?.increment) currentUser.tokenVersion += data.tokenVersion.increment;
+      if (data.microsoftObjectId) currentUser.microsoftObjectId = data.microsoftObjectId;
       return currentUser;
     }
   },
@@ -92,13 +106,32 @@ require.cache[prismaPath] = {
   exports: fakePrisma
 };
 
+const microsoftIdentityPath = require.resolve("../src/services/microsoftIdentity");
+require.cache[microsoftIdentityPath] = {
+  id: microsoftIdentityPath,
+  filename: microsoftIdentityPath,
+  loaded: true,
+  exports: {
+    verifyMicrosoftIdentity: async () => {
+      if (microsoftIdentityError) throw microsoftIdentityError;
+      return microsoftIdentity;
+    }
+  }
+};
+
 const authRoutes = require("../src/routes/auth");
-const { allowRoles } = require("../src/middleware/auth");
+const { authenticate, allowRoles } = require("../src/middleware/auth");
 const { createRateLimit } = require("../src/middleware/rateLimit");
 
 const app = express();
 app.use(express.json());
 app.use("/api/auth", authRoutes);
+app.get(
+  "/api/test/admin",
+  authenticate,
+  allowRoles("ADMIN"),
+  (req, res) => res.status(200).json({ success: true })
+);
 
 async function request(path, options = {}) {
   const server = await new Promise((resolve, reject) => {
@@ -120,11 +153,28 @@ function testUser(role = "STUDENT") {
     universityEmail: "u1234567@au.edu",
     universityId: "6612345",
     fullName: "Test User",
+    microsoftObjectId: null,
     passwordHash: null,
     tokenVersion: 0,
     isActive: true,
     role: { name: role }
   };
+}
+
+async function microsoftLogin(extra = {}) {
+  return request("/api/auth/microsoft", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ idToken: "verified-microsoft-token", ...extra })
+  });
+}
+
+async function developmentLogin(email, password = "correct-password") {
+  return request("/api/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
 }
 
 async function register(email, extra = {}) {
@@ -297,6 +347,102 @@ test("inactive account receives generic forgot response without a reset token", 
   assert.equal(resetTokens.length, 0);
 });
 
+test("verified Microsoft identity returns the existing database role and application JWT", async () => {
+  currentUser = testUser("STUDENT");
+  microsoftIdentityError = null;
+  microsoftIdentity = {
+    email: currentUser.universityEmail,
+    microsoftObjectId: "microsoft-object-student",
+    name: "Verified Student"
+  };
+
+  const response = await microsoftLogin({ role: "ADMIN" });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.user.role, "STUDENT");
+  assert.equal(body.user.email, currentUser.universityEmail);
+  assert.equal(jwt.verify(body.token, process.env.JWT_SECRET).sub, currentUser.id);
+});
+
+for (const role of ["STAFF", "ADMIN"]) {
+  test(`verified Microsoft identity preserves provisioned ${role} role`, async () => {
+    currentUser = testUser(role);
+    currentUser.universityEmail = `${role.toLowerCase()}@au.edu`;
+    currentUser.microsoftObjectId = `microsoft-object-${role.toLowerCase()}`;
+    microsoftIdentityError = null;
+    microsoftIdentity = {
+      email: currentUser.universityEmail,
+      microsoftObjectId: currentUser.microsoftObjectId,
+      name: `Verified ${role}`
+    };
+
+    const response = await microsoftLogin({ role: "STUDENT" });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.user.role, role);
+  });
+}
+
+test("verified first-login student is created only as STUDENT", async () => {
+  currentUser = null;
+  lastCreatedUserData = null;
+  microsoftIdentityError = null;
+  microsoftIdentity = {
+    email: "u7654321@au.edu",
+    microsoftObjectId: "microsoft-object-new-student",
+    name: "New Student"
+  };
+
+  const response = await microsoftLogin({ role: "ADMIN" });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.user.role, "STUDENT");
+  assert.equal(lastCreatedUserData.role.connect.name, "STUDENT");
+  assert.equal(lastCreatedUserData.passwordHash, undefined);
+});
+
+test("unprovisioned staff-style Microsoft identity is rejected", async () => {
+  currentUser = null;
+  microsoftIdentityError = null;
+  microsoftIdentity = {
+    email: "staffname@au.edu",
+    microsoftObjectId: "microsoft-object-new-staff",
+    name: "Unknown Staff"
+  };
+
+  const response = await microsoftLogin();
+  assert.equal(response.status, 403);
+});
+
+test("inactive Microsoft-authenticated user is rejected", async () => {
+  currentUser = testUser();
+  currentUser.isActive = false;
+  microsoftIdentityError = null;
+  microsoftIdentity = {
+    email: currentUser.universityEmail,
+    microsoftObjectId: "microsoft-object-inactive",
+    name: "Inactive User"
+  };
+
+  const response = await microsoftLogin();
+  assert.equal(response.status, 403);
+});
+
+test("unverified Microsoft identity is rejected", async () => {
+  currentUser = testUser();
+  microsoftIdentity = null;
+  microsoftIdentityError = Object.assign(new Error("invalid identity"), {
+    code: "MICROSOFT_IDENTITY_INVALID"
+  });
+
+  const response = await microsoftLogin();
+  assert.equal(response.status, 401);
+  microsoftIdentityError = null;
+});
+
 test("normal login returns an application JWT", async () => {
   currentUser = testUser();
   currentUser.passwordHash = await bcrypt.hash("correct-password", 4);
@@ -401,6 +547,45 @@ test("inactive user is rejected", async () => {
   });
 
   assert.equal(response.status, 401);
+});
+
+test("development password login is unavailable in production", async () => {
+  currentUser = testUser();
+  currentUser.passwordHash = await bcrypt.hash("correct-password", 4);
+  process.env.NODE_ENV = "production";
+
+  try {
+    const response = await developmentLogin(currentUser.universityEmail);
+    assert.equal(response.status, 404);
+  } finally {
+    process.env.NODE_ENV = "development";
+  }
+});
+
+test("development JWT enforces ADMIN RBAC for unauthenticated, STUDENT, and ADMIN requests", async () => {
+  const unauthenticatedResponse = await request("/api/test/admin");
+  assert.equal(unauthenticatedResponse.status, 401);
+
+  currentUser = testUser("STUDENT");
+  currentUser.passwordHash = await bcrypt.hash("correct-password", 4);
+  const studentLoginResponse = await developmentLogin(currentUser.universityEmail);
+  const studentAuth = await studentLoginResponse.json();
+  const studentResponse = await request("/api/test/admin", {
+    headers: { authorization: `Bearer ${studentAuth.token}` }
+  });
+  assert.equal(studentLoginResponse.status, 200);
+  assert.equal(studentResponse.status, 403);
+
+  currentUser = testUser("ADMIN");
+  currentUser.universityEmail = "admin@au.edu";
+  currentUser.passwordHash = await bcrypt.hash("correct-password", 4);
+  const adminLoginResponse = await developmentLogin(currentUser.universityEmail);
+  const adminAuth = await adminLoginResponse.json();
+  const adminResponse = await request("/api/test/admin", {
+    headers: { authorization: `Bearer ${adminAuth.token}` }
+  });
+  assert.equal(adminLoginResponse.status, 200);
+  assert.equal(adminResponse.status, 200);
 });
 
 test("authenticated user can access /me", async () => {
