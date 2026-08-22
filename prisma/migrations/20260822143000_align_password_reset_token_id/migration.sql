@@ -1,0 +1,1 @@
+ALTER TABLE "PasswordResetToken" ALTER COLUMN "id" DROP DEFAULT;
