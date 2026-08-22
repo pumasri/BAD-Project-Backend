@@ -5,12 +5,13 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/app.js && node --check src/routes/auth.js && node --check src/middleware/auth.js",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/routes/auth.js && node --check src/middleware/auth.js && node --check src/middleware/rateLimit.js && node --check src/config/env.js && node --check src/utils/studentEmail.js && node --check src/utils/password.js && node --check src/services/passwordResetDelivery.js && node --check scripts/createLocalStudent.js",
     "test": "node --test",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "prisma db seed"
+    "prisma:seed": "prisma db seed",
+    "user:create-local-student": "node scripts/createLocalStudent.js"
   },
   "repository": {
     "type": "git",
@@ -29,9 +30,9 @@
     "@prisma/client": "^7.9.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "jose": "^6.2.9",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.11.0",
     "pg": "^8.16.3",
@@ -40,7 +41,6 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/pg": "^8.15.6",
-    "dotenv": "^17.4.2",
     "nodemon": "^3.1.14",
     "prisma": "^7.9.0",
     "tsx": "^4.20.6",

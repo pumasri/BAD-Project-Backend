@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 
 const prisma = require("../config/prisma");
 
-async function requireAuth(req, res, next) {
+async function authenticate(req, res, next) {
   const authorization = req.headers.authorization;
 
   if (!authorization?.startsWith("Bearer ")) {
@@ -18,7 +18,13 @@ async function requireAuth(req, res, next) {
 
   try {
     const token = authorization.slice(7);
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, process.env.JWT_SECRET, {
+      algorithms: ["HS256"]
+    });
+
+    if (typeof payload !== "object" || typeof payload.sub !== "string") {
+      throw new Error("Invalid token subject");
+    }
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
       include: { role: true }
@@ -31,10 +37,17 @@ async function requireAuth(req, res, next) {
       });
     }
 
+    if ((payload.ver ?? 0) !== user.tokenVersion) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token"
+      });
+    }
+
     req.user = {
       id: user.id,
-      email: user.email,
-      name: user.displayName,
+      email: user.universityEmail,
+      name: user.fullName,
       role: user.role.name
     };
 
@@ -67,4 +80,7 @@ function allowRoles(...allowedRoles) {
   };
 }
 
-module.exports = { requireAuth, allowRoles };
+module.exports = {
+  authenticate,
+  allowRoles
+};
