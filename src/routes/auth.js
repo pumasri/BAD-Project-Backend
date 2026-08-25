@@ -14,10 +14,19 @@ const {
 } = require("../utils/password");
 const { createRateLimit } = require("../middleware/rateLimit");
 const { deliverPasswordReset } = require("../services/passwordResetDelivery");
-const { verifyMicrosoftIdentity } = require("../services/microsoftIdentity");
+const {
+  clearTransactionCookie,
+  completeAuthorization,
+  consumeHandoff,
+  createAuthorizationRequest,
+  createHandoff,
+  frontendLoginUrl,
+  microsoftLogoutUrl
+} = require("../services/microsoftOidc");
 
 const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
+const applicationRoles = new Set(["STUDENT", "STAFF", "ADMIN"]);
 const genericResetMessage =
   "If an account exists for this email, password reset instructions have been sent.";
 const sensitiveEndpointMessage = "Too many attempts. Please try again later.";
@@ -31,16 +40,18 @@ const resetRateLimit = createRateLimit({
   max: isProduction ? 5 : 100,
   message: sensitiveEndpointMessage
 });
-const dummyPasswordHash = bcrypt.hashSync(
-  "authentication-timing-placeholder",
-  PASSWORD_HASH_ROUNDS
-);
 
 function hashResetToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function safeUser(user) {
+  if (!applicationRoles.has(user.role?.name)) {
+    const error = new Error("The account role is invalid");
+    error.code = "INVALID_ACCOUNT_ROLE";
+    throw error;
+  }
+
   return {
     id: user.id,
     email: user.universityEmail,
@@ -53,6 +64,11 @@ function createToken(user) {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is required");
   }
+  if (!applicationRoles.has(user.role?.name)) {
+    const error = new Error("The account role is invalid");
+    error.code = "INVALID_ACCOUNT_ROLE";
+    throw error;
+  }
 
   return jwt.sign(
     { sub: user.id, role: user.role.name, ver: user.tokenVersion || 0 },
@@ -61,77 +77,7 @@ function createToken(user) {
   );
 }
 
-function developmentOnly(req, res, next) {
-  if (process.env.NODE_ENV !== "development") {
-    return res.status(404).json({
-      success: false,
-      message: "Not found"
-    });
-  }
-
-  return next();
-}
-
-router.post("/login", developmentOnly, loginRateLimit, async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  const password = req.body?.password;
-
-  if (!isAuEmail(email) || email.length > 254 || typeof password !== "string" || !password || password.length > MAX_PASSWORD_LENGTH) {
-    return res.status(400).json({
-      success: false,
-      message: "Email and password are required"
-    });
-  }
-
-  const user = await prisma.user.findFirst({
-    where: { universityEmail: { equals: email, mode: "insensitive" } },
-    include: { role: true }
-  });
-
-  const passwordMatches = await bcrypt.compare(
-    password,
-    user?.passwordHash || dummyPasswordHash
-  );
-
-  if (!user || !user.passwordHash || !passwordMatches || !user.isActive) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid email or password"
-    });
-  }
-
-  return res.status(200).json({
-    token: createToken(user),
-    user: safeUser(user)
-  });
-});
-
-router.post("/microsoft", loginRateLimit, async (req, res) => {
-  const idToken = typeof req.body?.idToken === "string" ? req.body.idToken : "";
-
-  if (!idToken || idToken.length > 20_000) {
-    return res.status(400).json({
-      success: false,
-      message: "Microsoft identity token is required"
-    });
-  }
-
-  let identity;
-  try {
-    identity = await verifyMicrosoftIdentity(idToken);
-  } catch (error) {
-    if (error.code === "MICROSOFT_AUTH_NOT_CONFIGURED") {
-      return res.status(503).json({
-        success: false,
-        message: "Microsoft authentication is not configured"
-      });
-    }
-    return res.status(401).json({
-      success: false,
-      message: "Microsoft authentication failed"
-    });
-  }
-
+async function findOrProvisionMicrosoftUser(identity) {
   let user = await prisma.user.findFirst({
     where: {
       OR: [
@@ -143,13 +89,6 @@ router.post("/microsoft", loginRateLimit, async (req, res) => {
   });
 
   if (!user) {
-    if (!isAuStudentEmail(identity.email)) {
-      return res.status(403).json({
-        success: false,
-        message: "This AU account has not been provisioned"
-      });
-    }
-
     user = await prisma.user.create({
       data: {
         universityEmail: identity.email,
@@ -163,10 +102,9 @@ router.post("/microsoft", loginRateLimit, async (req, res) => {
     user.microsoftObjectId &&
     user.microsoftObjectId !== identity.microsoftObjectId
   ) {
-    return res.status(403).json({
-      success: false,
-      message: "Microsoft authentication failed"
-    });
+    const error = new Error("Microsoft authentication failed");
+    error.code = "MICROSOFT_AUTH_FAILED";
+    throw error;
   } else if (!user.microsoftObjectId) {
     user = await prisma.user.update({
       where: { id: user.id },
@@ -176,16 +114,77 @@ router.post("/microsoft", loginRateLimit, async (req, res) => {
   }
 
   if (!user.isActive) {
-    return res.status(403).json({
+    const error = new Error("This account is inactive");
+    error.code = "MICROSOFT_ACCOUNT_INACTIVE";
+    throw error;
+  }
+
+  return user;
+}
+
+router.get("/microsoft", loginRateLimit, async (req, res) => {
+  try {
+    const authorization = await createAuthorizationRequest();
+    res.setHeader("Set-Cookie", authorization.cookie);
+    return res.redirect(302, authorization.authorizationUrl);
+  } catch (error) {
+    const status = error.code === "MICROSOFT_AUTH_NOT_CONFIGURED" ? 503 : 500;
+    return res.status(status).json({
       success: false,
-      message: "This account is inactive"
+      message: status === 503
+        ? "Microsoft authentication is not configured"
+        : "Unable to start Microsoft authentication"
+    });
+  }
+});
+
+router.get("/microsoft/callback", loginRateLimit, async (req, res) => {
+  res.setHeader("Set-Cookie", clearTransactionCookie());
+
+  try {
+    const identity = await completeAuthorization(req);
+    const user = await findOrProvisionMicrosoftUser(identity);
+    const handoff = createHandoff({
+      token: createToken(user),
+      user: safeUser(user)
+    });
+    return res.redirect(302, frontendLoginUrl({ microsoft_handoff: handoff }));
+  } catch (error) {
+    const reason = error.code === "MICROSOFT_ACCOUNT_INACTIVE"
+      ? "account_inactive"
+      : "authentication_failed";
+    return res.redirect(302, frontendLoginUrl({ microsoft_error: reason }));
+  }
+});
+
+router.post("/microsoft/exchange", loginRateLimit, (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const code = typeof req.body?.code === "string" ? req.body.code : "";
+  if (!code || code.length > 256) {
+    return res.status(400).json({ success: false, message: "Invalid sign-in handoff" });
+  }
+
+  const auth = consumeHandoff(code);
+  if (!auth) {
+    return res.status(401).json({
+      success: false,
+      message: "This sign-in attempt has expired or was already used"
     });
   }
 
-  return res.status(200).json({
-    token: createToken(user),
-    user: safeUser(user)
+  return res.status(200).json(auth);
+});
+
+router.get("/microsoft/logout", async (req, res) => {
+  return res.redirect(302, await microsoftLogoutUrl());
+});
+
+router.post("/logout", authenticate, async (req, res) => {
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { tokenVersion: { increment: 1 } }
   });
+  return res.status(204).end();
 });
 
 router.post("/register", async (req, res) => {
