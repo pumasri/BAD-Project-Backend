@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 
 const prisma = require("../config/prisma");
+const applicationRoles = new Set(["STUDENT", "STAFF", "ADMIN"]);
 
 async function authenticate(req, res, next) {
   const authorization = req.headers.authorization;
@@ -30,7 +31,7 @@ async function authenticate(req, res, next) {
       include: { role: true }
     });
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || !applicationRoles.has(user.role?.name)) {
       return res.status(401).json({
         success: false,
         message: "Invalid or inactive account"
