@@ -1,8 +1,26 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 const router = express.Router();
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+});
 
 // POST /api/claims (Student)
 router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => {
@@ -23,7 +41,7 @@ router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => 
       });
     }
 
-    if (foundItem.status !== "OPEN" && foundItem.status !== "MATCHED") {
+    if (foundItem.status !== "OPEN" && foundItem.status !== "CLAIM_IN_PROGRESS" && foundItem.status !== "MATCHED") {
       return res.status(400).json({
         message: "This item is not available for a new claim"
       });
@@ -42,11 +60,13 @@ router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => 
       include: { evidence: true }
     });
     
-    // Also update item status to CLAIM_IN_PROGRESS if it's OPEN or MATCHED
-    await prisma.itemReport.update({
-      where: { id: foundReportId },
-      data: { status: "CLAIM_IN_PROGRESS" }
-    });
+    // Update item status to CLAIM_IN_PROGRESS if it was OPEN or MATCHED
+    if (foundItem.status === "OPEN" || foundItem.status === "MATCHED") {
+      await prisma.itemReport.update({
+        where: { id: foundReportId },
+        data: { status: "CLAIM_IN_PROGRESS" }
+      });
+    }
     
     await prisma.auditLog.create({
       data: {
@@ -63,13 +83,58 @@ router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => 
   }
 });
 
+// POST /api/claims/:id/evidence (Student)
+router.post("/:id/evidence", authenticate, allowRoles("STUDENT"), upload.single("image"), async (req, res, next) => {
+  try {
+    const claim = await prisma.claimRequest.findUnique({
+      where: { id: req.params.id }
+    });
+
+    if (!claim) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(404).json({ message: "Claim not found" });
+    }
+
+    if (claim.claimantUserId !== req.user.id) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "No image file provided" });
+    }
+
+    const evidence = await prisma.claimEvidence.create({
+      data: {
+        evidenceType: "IMAGE",
+        objectKey: req.file.filename,
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        claimRequestId: claim.id
+      }
+    });
+
+    res.status(201).json(evidence);
+  } catch (error) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    next(error);
+  }
+});
+
 // GET /api/claims/my (Student)
 router.get("/my", authenticate, allowRoles("STUDENT"), async (req, res, next) => {
   try {
     const claims = await prisma.claimRequest.findMany({
       where: { claimantUserId: req.user.id },
       include: {
-        foundReport: true
+        foundReport: true,
+        evidence: true
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -91,7 +156,8 @@ router.get("/", authenticate, allowRoles("STAFF"), async (req, res, next) => {
       where,
       include: {
         claimant: { select: { id: true, fullName: true, universityEmail: true } },
-        foundReport: true
+        foundReport: true,
+        evidence: true
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -142,12 +208,39 @@ router.patch("/:id/review", authenticate, allowRoles("STAFF"), async (req, res, 
       }
     });
     
-    // Depending on the claim status, update the item report status
+    // Depending on the claim status, update the item report status and manage other claims
     let itemStatus = undefined;
     if (status === "APPROVED") {
       itemStatus = "RESOLVED";
+      
+      // Auto-reject all other pending claims for this item
+      await prisma.claimRequest.updateMany({
+        where: {
+          foundReportId: claim.foundReportId,
+          id: { not: claim.id },
+          status: "PENDING"
+        },
+        data: {
+          status: "REJECTED",
+          reviewNote: "This item has been claimed by another user.",
+          reviewedByUserId: req.user.id
+        }
+      });
     } else if (status === "REJECTED") {
-      itemStatus = "OPEN";
+      // Check if there are other pending claims left
+      const otherPendingClaimsCount = await prisma.claimRequest.count({
+        where: {
+          foundReportId: claim.foundReportId,
+          id: { not: claim.id },
+          status: "PENDING"
+        }
+      });
+      
+      if (otherPendingClaimsCount === 0) {
+        itemStatus = "OPEN";
+      } else {
+        itemStatus = "CLAIM_IN_PROGRESS";
+      }
     }
     
     if (itemStatus) {

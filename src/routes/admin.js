@@ -1,6 +1,8 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
+const bcrypt = require("bcryptjs");
+const { isValidPassword } = require("../utils/password");
 
 const router = express.Router();
 
@@ -22,6 +24,62 @@ router.get("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) =
       role: u.role.name,
       isActive: u.isActive
     })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/admin/users (Admin)
+router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  try {
+    const { email, name, password, roleName = "STAFF" } = req.body;
+    
+    if (!email || !name || !password) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+    
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ success: false, message: "Password does not meet requirements" });
+    }
+    
+    const existingUser = await prisma.user.findFirst({
+      where: { universityEmail: { equals: email, mode: "insensitive" } }
+    });
+    
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "User with this email already exists" });
+    }
+    
+    const hashedPassword = await bcrypt.hash(password, 12);
+    
+    const user = await prisma.user.create({
+      data: {
+        universityEmail: email,
+        fullName: name,
+        passwordHash: hashedPassword,
+        isActive: true,
+        role: { connect: { name: roleName } }
+      },
+      include: { role: true }
+    });
+    
+    await prisma.auditLog.create({
+      data: {
+        action: "CREATE_USER",
+        entityType: "User",
+        entityId: user.id,
+        details: { role: user.role.name, email: user.universityEmail },
+        actorUserId: req.user.id
+      }
+    });
+    
+    res.status(201).json({
+      id: user.id,
+      email: user.universityEmail,
+      name: user.fullName,
+      role: user.role.name,
+      isActive: user.isActive
+    });
   } catch (error) {
     next(error);
   }
