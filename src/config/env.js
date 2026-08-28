@@ -3,7 +3,11 @@ const requiredVariables = [
   "JWT_SECRET",
   "JWT_EXPIRES_IN",
   "PORT",
-  "FRONTEND_URL"
+  "FRONTEND_URL",
+  "MICROSOFT_CLIENT_ID",
+  "MICROSOFT_TENANT_ID",
+  "MICROSOFT_CLIENT_SECRET",
+  "MICROSOFT_REDIRECT_URI"
 ];
 
 function validateEnvironment() {
