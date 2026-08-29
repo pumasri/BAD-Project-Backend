@@ -7,6 +7,7 @@ const {
 const {
   createEmbeddingFingerprint,
   generateEmbedding,
+  getEmbeddingModel,
   normalizeText,
   validateEmbedding
 } = require("./embedding.services");
@@ -140,7 +141,7 @@ async function recordEmbeddingFailure(reportId, error) {
 }
 
 async function ensureEmbedding(report) {
-  const model = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
+  const model = getEmbeddingModel();
   const fingerprint = createEmbeddingFingerprint(report, model);
   if (
     report.embeddingStatus === "READY" &&
@@ -258,4 +259,3 @@ module.exports = {
   queueMatchingForReport,
   runMatchingForReport
 };
-

@@ -189,7 +189,7 @@ function consumeHandoff(code) {
 
 function frontendLoginUrl(parameters = {}) {
   const { frontendUrl } = getSettings();
-  const url = new URL("/student-login", frontendUrl);
+  const url = new URL("/login", frontendUrl);
   for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
   return url.href;
 }

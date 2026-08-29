@@ -2,11 +2,16 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
-process.env.OPENAI_EMBEDDING_MODEL = "test-model";
+process.env.EMBEDDING_PROVIDER = "gemini";
+process.env.EMBEDDING_MODEL = "gemini-test-model";
+process.env.GEMINI_API_KEY = "test-gemini-key";
+process.env.GEMINI_BASE_URL = "https://example.invalid/v1beta/openai/";
 
 const {
   buildMatchingText,
   createEmbeddingFingerprint,
+  generateEmbedding,
+  safeEmbeddingErrorCode,
   validateEmbedding
 } = require("../src/services/embedding.services");
 
@@ -120,6 +125,30 @@ test("embedding helpers handle missing fields and invalid vectors", () => {
   assert.throws(() => validateEmbedding([]), /invalid response/);
 });
 
+test("Gemini-compatible embedding response uses the configured model without a real request", async () => {
+  let request;
+  const client = {
+    embeddings: {
+      create: async (value) => {
+        request = value;
+        return { data: [{ embedding: [0.25, 0.5, 0.75] }] };
+      }
+    }
+  };
+
+  const result = await generateEmbedding(report(), { client });
+  assert.deepEqual(request, { model: "gemini-test-model", input: buildMatchingText(report()) });
+  assert.deepEqual(result.vector, [0.25, 0.5, 0.75]);
+  assert.equal(result.model, "gemini-test-model");
+});
+
+test("provider failures are mapped to generic safe categories", () => {
+  assert.equal(safeEmbeddingErrorCode({ status: 429 }), "EMBEDDING_RATE_LIMITED");
+  assert.equal(safeEmbeddingErrorCode({ status: 401 }), "EMBEDDING_AUTH_FAILED");
+  assert.equal(safeEmbeddingErrorCode({ code: "ETIMEDOUT" }), "EMBEDDING_TIMEOUT");
+  assert.equal(safeEmbeddingErrorCode({ status: 503 }), "EMBEDDING_PROVIDER_UNAVAILABLE");
+});
+
 test("cosine similarity handles identical and dissimilar vectors", () => {
   assert.equal(matching.cosineSimilarity([1, 2], [1, 2]), 1);
   assert.equal(matching.cosineSimilarity([1, 0], [0, 1]), 0);
@@ -206,6 +235,9 @@ test("stored embeddings are reused and changed matching content regenerates", as
   value.title = "Changed wallet";
   await matching.ensureEmbedding(value);
   assert.equal(embeddingCalls, 2);
+  value.embeddingModel = "older-model";
+  await matching.ensureEmbedding(value);
+  assert.equal(embeddingCalls, 3);
 });
 
 test("provider failure is recorded without leaking provider details", async () => {
@@ -217,7 +249,7 @@ test("provider failure is recorded without leaking provider details", async () =
   assert.equal(value.embeddingError, "EMBEDDING_PROVIDER_ERROR");
 });
 
-test("queued matching isolates OpenAI failure from report creation", async () => {
+test("queued matching isolates embedding provider failure from report creation", async () => {
   const value = report();
   reports.set(value.id, value);
   embeddingFailure = true;

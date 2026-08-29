@@ -1,8 +1,7 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
-const bcrypt = require("bcryptjs");
-const { isValidPassword } = require("../utils/password");
+const { normalizeEmail, isAuEmail } = require("../utils/studentEmail");
 
 const router = express.Router();
 
@@ -32,14 +31,15 @@ router.get("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) =
 // POST /api/admin/users (Admin)
 router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
-    const { email, name, password, roleName = "STAFF" } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const roleName = req.body?.roleName || "STAFF";
     
-    if (!email || !name || !password) {
+    if (!isAuEmail(email) || !name) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
-    
-    if (!isValidPassword(password)) {
-      return res.status(400).json({ success: false, message: "Password does not meet requirements" });
+    if (!new Set(["STUDENT", "STAFF", "ADMIN"]).has(roleName)) {
+      return res.status(400).json({ success: false, message: "Invalid role" });
     }
     
     const existingUser = await prisma.user.findFirst({
@@ -50,13 +50,10 @@ router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) 
       return res.status(400).json({ success: false, message: "User with this email already exists" });
     }
     
-    const hashedPassword = await bcrypt.hash(password, 12);
-    
     const user = await prisma.user.create({
       data: {
         universityEmail: email,
         fullName: name,
-        passwordHash: hashedPassword,
         isActive: true,
         role: { connect: { name: roleName } }
       },

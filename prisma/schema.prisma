@@ -67,45 +67,27 @@ model Role {
 }
 
 model User {
-  id                    String    @id @default(uuid()) @db.Uuid
-  universityEmail       String    @unique @map("email")
-  username              String?   @unique
-  universityId          String?   @unique
-  fullName              String    @map("displayName")
-  microsoftObjectId     String?   @unique @map("microsoftOid")
-  passwordHash          String?
-  tokenVersion          Int       @default(0)
-  isActive              Boolean   @default(true)
-  verificationCode      String?
-  verificationExpiresAt DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  id                String   @id @default(uuid()) @db.Uuid
+  universityEmail   String   @unique @map("email")
+  username          String?  @unique
+  universityId      String?  @unique
+  fullName          String   @map("displayName")
+  microsoftObjectId String?  @unique @map("microsoftOid")
+  tokenVersion      Int      @default(0)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   roleId String @db.Uuid
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
-  itemReports         ItemReport[]
-  submittedClaims     ClaimRequest[]       @relation("ClaimantClaims")
-  reviewedClaims      ClaimRequest[]       @relation("ReviewerClaims")
-  reviewedMatches     MatchSuggestion[]    @relation("MatchReviewer")
-  auditLogs           AuditLog[]
-  passwordResetTokens PasswordResetToken[]
+  itemReports     ItemReport[]
+  submittedClaims ClaimRequest[]    @relation("ClaimantClaims")
+  reviewedClaims  ClaimRequest[]    @relation("ReviewerClaims")
+  reviewedMatches MatchSuggestion[] @relation("MatchReviewer")
+  auditLogs       AuditLog[]
 
   @@index([roleId])
-}
-
-model PasswordResetToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  tokenHash String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([expiresAt])
 }
 
 model ItemCategory {
