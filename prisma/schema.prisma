@@ -38,6 +38,25 @@ enum ClaimStatus {
   MORE_INFORMATION_REQUIRED
 }
 
+enum EmbeddingStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+enum MatchConfidence {
+  HIGH
+  POSSIBLE
+}
+
+enum MatchStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+  CLAIMED
+  RESOLVED
+}
+
 model Role {
   id        String   @id @default(uuid()) @db.Uuid
   name      RoleName @unique
@@ -68,6 +87,7 @@ model User {
   itemReports         ItemReport[]
   submittedClaims     ClaimRequest[]       @relation("ClaimantClaims")
   reviewedClaims      ClaimRequest[]       @relation("ReviewerClaims")
+  reviewedMatches     MatchSuggestion[]    @relation("MatchReviewer")
   auditLogs           AuditLog[]
   passwordResetTokens PasswordResetToken[]
 
@@ -100,19 +120,25 @@ model ItemCategory {
 }
 
 model ItemReport {
-  id          String       @id @default(uuid()) @db.Uuid
-  title       String
-  description String       @db.Text
-  reportType  ReportType
-  status      ReportStatus @default(OPEN)
-  location    String
-  occurredAt  DateTime
-  reportedAt  DateTime     @default(now())
-  color       String?
-  brand       String?
-  isPublic    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id                   String          @id @default(uuid()) @db.Uuid
+  title                String
+  description          String          @db.Text
+  reportType           ReportType
+  status               ReportStatus    @default(OPEN)
+  location             String
+  occurredAt           DateTime
+  reportedAt           DateTime        @default(now())
+  color                String?
+  brand                String?
+  isPublic             Boolean         @default(true)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  embedding            Json?
+  embeddingModel       String?
+  embeddingUpdatedAt   DateTime?
+  embeddingFingerprint String?
+  embeddingStatus      EmbeddingStatus @default(PENDING)
+  embeddingError       String?
 
   createdById String @db.Uuid
   categoryId  String @db.Uuid
@@ -146,20 +172,33 @@ model ItemImage {
 }
 
 model MatchSuggestion {
-  id              String   @id @default(uuid()) @db.Uuid
-  confidenceScore Float
-  matchSource     String
-  createdAt       DateTime @default(now())
+  id                         String          @id @default(uuid()) @db.Uuid
+  totalScore                 Float
+  descriptionSimilarityScore Float
+  categoryScore              Float
+  colorScore                 Float
+  locationScore              Float
+  dateScore                  Float
+  confidence                 MatchConfidence
+  reasons                    Json
+  status                     MatchStatus     @default(SUGGESTED)
+  matchSource                String          @default("AI_ASSISTED")
+  reviewedAt                 DateTime?
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
 
-  lostReportId  String @db.Uuid
-  foundReportId String @db.Uuid
+  lostReportId  String  @db.Uuid
+  foundReportId String  @db.Uuid
+  reviewerId    String? @db.Uuid
 
   lostReport  ItemReport @relation("LostReportMatches", fields: [lostReportId], references: [id], onDelete: Restrict)
   foundReport ItemReport @relation("FoundReportMatches", fields: [foundReportId], references: [id], onDelete: Restrict)
+  reviewer    User?      @relation("MatchReviewer", fields: [reviewerId], references: [id], onDelete: Restrict)
 
   @@unique([lostReportId, foundReportId])
   @@index([foundReportId])
-  @@index([confidenceScore])
+  @@index([status, totalScore])
+  @@index([reviewerId])
 }
 
 model ClaimRequest {
