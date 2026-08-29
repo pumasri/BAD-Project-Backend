@@ -188,45 +188,6 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(204).end();
 });
 
-router.post("/login", loginRateLimit, async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  const password = req.body?.password;
-
-  if (!email || !password || typeof password !== "string") {
-    return res.status(400).json({ success: false, message: "Email and password are required" });
-  }
-
-  const user = await prisma.user.findFirst({
-    where: { universityEmail: { equals: email, mode: "insensitive" } },
-    include: { role: true }
-  });
-
-  if (!user || !user.passwordHash) {
-    return res.status(401).json({ success: false, message: "Invalid email or password" });
-  }
-
-  if (!user.isActive) {
-    if (user.verificationCode) {
-      return res.status(403).json({ 
-        success: false, 
-        code: "EMAIL_NOT_VERIFIED", 
-        message: "Your email is not verified yet. Please verify your email first." 
-      });
-    }
-    return res.status(401).json({ success: false, message: "This account has been deactivated" });
-  }
-
-  const isMatch = await bcrypt.compare(password, user.passwordHash);
-  if (!isMatch) {
-    return res.status(401).json({ success: false, message: "Invalid email or password" });
-  }
-
-  return res.status(200).json({
-    token: createToken(user),
-    user: safeUser(user)
-  });
-});
-
 router.post("/register", async (req, res) => {
   const email = normalizeEmail(req.body?.email);
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
@@ -285,7 +246,8 @@ router.post("/register", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Verification code sent to your email. Please verify your email."
+      message: "Verification code sent to your email. Please verify your email.",
+      user: safeUser(user)
     });
   } catch (error) {
     if (error.code === "P2002") {
