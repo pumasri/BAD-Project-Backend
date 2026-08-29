@@ -99,7 +99,7 @@ function transactionCookie(value, maxAgeSeconds) {
   return `${TRANSACTION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Lax; Path=/api/auth/microsoft/callback; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
-async function createAuthorizationRequest() {
+async function createAuthorizationRequest(redirect) {
   const { oidc, config, settings } = await getClient();
   const state = oidc.randomState();
   const nonce = oidc.randomNonce();
@@ -120,6 +120,7 @@ async function createAuthorizationRequest() {
     state,
     nonce,
     codeVerifier,
+    redirect,
     expiresAt: Date.now() + TRANSACTION_TTL_MS
   });
 
@@ -160,7 +161,8 @@ async function completeAuthorization(req) {
     microsoftObjectId: claims.oid,
     name: typeof claims.name === "string" && claims.name.trim()
       ? claims.name.trim().slice(0, 120)
-      : email.split("@")[0]
+      : email.split("@")[0],
+    redirect: transaction.redirect
   };
 }
 
@@ -187,7 +189,7 @@ function consumeHandoff(code) {
 
 function frontendLoginUrl(parameters = {}) {
   const { frontendUrl } = getSettings();
-  const url = new URL("/login", frontendUrl);
+  const url = new URL("/student-login", frontendUrl);
   for (const [key, value] of Object.entries(parameters)) url.searchParams.set(key, value);
   return url.href;
 }
