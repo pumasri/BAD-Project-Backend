@@ -114,6 +114,82 @@ router.patch("/users/:id/role", authenticate, allowRoles("ADMIN"), async (req, r
   }
 });
 
+// PATCH /api/admin/users/:id/status (Admin)
+router.patch("/users/:id/status", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  try {
+    const { isActive } = req.body;
+
+    // Prevent admin from deactivating their own account
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ success: false, message: "You cannot deactivate your own account" });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { isActive },
+      include: { role: true }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "UPDATE_USER_STATUS",
+        entityType: "User",
+        entityId: user.id,
+        details: { isActive: user.isActive },
+        actorUserId: req.user.id
+      }
+    });
+
+    res.json({
+      id: user.id,
+      email: user.universityEmail,
+      name: user.fullName,
+      role: user.role.name,
+      isActive: user.isActive
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/admin/categories (Admin)
+router.get("/categories", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  try {
+    const categories = await prisma.itemCategory.findMany({
+      orderBy: { name: 'asc' }
+    });
+    res.json(categories);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/admin/categories/:id/status (Admin)
+router.patch("/categories/:id/status", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  try {
+    const { isActive } = req.body;
+
+    const category = await prisma.itemCategory.update({
+      where: { id: req.params.id },
+      data: { isActive }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "UPDATE_CATEGORY_STATUS",
+        entityType: "ItemCategory",
+        entityId: category.id,
+        details: { isActive: category.isActive },
+        actorUserId: req.user.id
+      }
+    });
+
+    res.json(category);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/admin/audit-logs (Admin)
 router.get("/audit-logs", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {

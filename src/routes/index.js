@@ -6,6 +6,7 @@ const adminRoutes = require("./admin");
 const categoriesRoutes = require("./categories");
 const peerRoutes = require("./peer");
 const matchesRoutes = require("./matches");
+const chatRoutes = require("./chat");
 
 const router = express.Router();
 
@@ -24,5 +25,6 @@ router.use("/admin", adminRoutes);
 router.use("/categories", categoriesRoutes);
 router.use("/peer", peerRoutes);
 router.use("/matches", matchesRoutes);
+router.use("/chat", chatRoutes);
 
 module.exports = router;

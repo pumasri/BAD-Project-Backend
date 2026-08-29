@@ -46,6 +46,12 @@ router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => 
         message: "This item is not available for a new claim"
       });
     }
+
+    if (foundItem.createdById === req.user.id) {
+      return res.status(400).json({
+        message: "You cannot claim an item that you reported."
+      });
+    }
     
     const claim = await prisma.claimRequest.create({
       data: {

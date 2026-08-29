@@ -23,13 +23,13 @@ const loginRateLimit = createRateLimit({
   max: isProduction ? 10 : 100,
   message: sensitiveEndpointMessage
 });
+
 function safeUser(user) {
   if (!applicationRoles.has(user.role?.name)) {
     const error = new Error("The account role is invalid");
     error.code = "INVALID_ACCOUNT_ROLE";
     throw error;
   }
-
   return {
     id: user.id,
     email: user.universityEmail,
@@ -39,15 +39,12 @@ function safeUser(user) {
 }
 
 function createToken(user) {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET is required");
-  }
+  if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is required");
   if (!applicationRoles.has(user.role?.name)) {
     const error = new Error("The account role is invalid");
     error.code = "INVALID_ACCOUNT_ROLE";
     throw error;
   }
-
   return jwt.sign(
     { sub: user.id, role: user.role.name, ver: user.tokenVersion || 0 },
     process.env.JWT_SECRET,
@@ -76,10 +73,7 @@ async function findOrProvisionMicrosoftUser(identity) {
       },
       include: { role: true }
     });
-  } else if (
-    user.microsoftObjectId &&
-    user.microsoftObjectId !== identity.microsoftObjectId
-  ) {
+  } else if (user.microsoftObjectId && user.microsoftObjectId !== identity.microsoftObjectId) {
     const error = new Error("Microsoft authentication failed");
     error.code = "MICROSOFT_AUTH_FAILED";
     throw error;
@@ -96,7 +90,6 @@ async function findOrProvisionMicrosoftUser(identity) {
     error.code = "MICROSOFT_ACCOUNT_INACTIVE";
     throw error;
   }
-
   return user;
 }
 
@@ -119,7 +112,6 @@ router.get("/microsoft", loginRateLimit, async (req, res) => {
 router.get("/microsoft/callback", loginRateLimit, async (req, res) => {
   res.setHeader("Set-Cookie", clearTransactionCookie());
   let authenticationStage = "authorization";
-
   try {
     const identity = await completeAuthorization(req);
     authenticationStage = "user_provisioning";
@@ -149,7 +141,6 @@ router.post("/microsoft/exchange", loginRateLimit, (req, res) => {
   if (!code || code.length > 256) {
     return res.status(400).json({ success: false, message: "Invalid sign-in handoff" });
   }
-
   const auth = consumeHandoff(code);
   if (!auth) {
     return res.status(401).json({
@@ -157,7 +148,6 @@ router.post("/microsoft/exchange", loginRateLimit, (req, res) => {
       message: "This sign-in attempt has expired or was already used"
     });
   }
-
   return res.status(200).json(auth);
 });
 
