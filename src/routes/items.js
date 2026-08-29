@@ -119,6 +119,13 @@ router.post("/:id/images", authenticate, allowRoles("STUDENT", "STAFF"), upload.
       return res.status(404).json({ message: "Item not found" });
     }
 
+    if (req.user.role === "STUDENT" && item.createdById !== req.user.id) {
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(403).json({ message: "Forbidden: You do not own this item report." });
+    }
+
     if (!req.file) {
       return res.status(400).json({ message: "No image file provided" });
     }

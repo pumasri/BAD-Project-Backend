@@ -299,6 +299,49 @@ router.post("/register", async (req, res) => {
   }
 });
 
+router.post("/verify-otp", async (req, res, next) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+
+    if (!email || !code) {
+      return res.status(400).json({ success: false, message: "Email and verification code are required" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { universityEmail: email }
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.isActive && !user.verificationCode) {
+      return res.status(200).json({ success: true, message: "Email is already verified." });
+    }
+
+    if (user.verificationCode !== code || !user.verificationExpiresAt || user.verificationExpiresAt < new Date()) {
+      return res.status(400).json({ success: false, message: "Invalid or expired verification code" });
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isActive: true,
+        verificationCode: null,
+        verificationExpiresAt: null
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Email verified successfully! You can now log in."
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/forgot-password", resetRateLimit, async (req, res) => {
   const email = normalizeEmail(req.body?.email);
 
