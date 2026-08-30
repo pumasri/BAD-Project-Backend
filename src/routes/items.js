@@ -4,6 +4,7 @@ const { authenticate, allowRoles } = require("../middleware/auth");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { queueMatchingForReport, runMatchingForReport } = require("../services/matching.service");
 
 const router = express.Router();
 
@@ -46,6 +47,54 @@ router.get("/", async (req, res, next) => {
     res.json(items);
   } catch (error) {
     next(error);
+  }
+});
+
+router.get("/:id/matches", authenticate, allowRoles("STUDENT", "STAFF", "ADMIN"), async (req, res, next) => {
+  try {
+    const report = await prisma.itemReport.findUnique({ where: { id: req.params.id } });
+    if (!report) return res.status(404).json({ message: "Item not found" });
+    if (req.user.role === "STUDENT" && (report.reportType !== "LOST" || report.createdById !== req.user.id)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const reportFilter = report.reportType === "LOST" ? { lostReportId: report.id } : { foundReportId: report.id };
+    const matches = await prisma.matchSuggestion.findMany({
+      where: req.user.role === "STUDENT"
+        ? { ...reportFilter, status: { in: ["SUGGESTED", "CONFIRMED", "CLAIMED", "RESOLVED"] } }
+        : reportFilter,
+      include: {
+        lostReport: { include: { category: true } },
+        foundReport: { include: { category: true } }
+      },
+      orderBy: { totalScore: "desc" }
+    });
+
+    if (req.user.role !== "STUDENT") return res.json(matches);
+    return res.json(matches.map((match) => ({
+      id: match.id,
+      score: match.totalScore,
+      confidence: match.confidence,
+      status: match.status,
+      reasons: match.reasons,
+      foundItem: {
+        category: match.foundReport.category?.name || null,
+        approximateLocation: match.foundReport.location.split(",")[0].trim(),
+        approximateDate: new Date(match.foundReport.occurredAt).toISOString().slice(0, 7)
+      }
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/matches/run", authenticate, allowRoles("STAFF", "ADMIN"), async (req, res, next) => {
+  try {
+    const matches = await runMatchingForReport(req.params.id);
+    return res.status(200).json({ matches });
+  } catch (error) {
+    if (error.code === "REPORT_NOT_FOUND") return res.status(404).json({ message: "Item not found" });
+    return next(error);
   }
 });
 
@@ -100,6 +149,7 @@ router.post("/", authenticate, allowRoles("STUDENT", "STAFF"), async (req, res, 
     });
     
     res.status(201).json(item);
+    queueMatchingForReport(item.id);
   } catch (error) {
     next(error);
   }
@@ -151,7 +201,7 @@ router.post("/:id/images", authenticate, allowRoles("STUDENT", "STAFF"), upload.
 // PATCH /api/items/:id (Staff)
 router.patch("/:id", authenticate, allowRoles("STAFF"), async (req, res, next) => {
   try {
-    const { title, description, location, status } = req.body;
+    const { title, description, location, status, categoryId, color, brand, occurredAt } = req.body;
     
     const item = await prisma.itemReport.update({
       where: { id: req.params.id },
@@ -159,7 +209,11 @@ router.patch("/:id", authenticate, allowRoles("STAFF"), async (req, res, next) =
         title,
         description,
         location,
-        status
+        status,
+        categoryId,
+        color,
+        brand,
+        occurredAt: occurredAt === undefined ? undefined : new Date(occurredAt)
       }
     });
     
@@ -174,23 +228,50 @@ router.patch("/:id", authenticate, allowRoles("STAFF"), async (req, res, next) =
     });
     
     res.json(item);
+    queueMatchingForReport(item.id);
   } catch (error) {
     next(error);
   }
 });
 
 // POST /api/items/:id/match (Staff)
-router.post("/:id/match", authenticate, allowRoles("STAFF"), async (req, res, next) => {
+router.post("/:id/match", authenticate, allowRoles("STAFF", "ADMIN"), async (req, res, next) => {
   try {
     const { foundReportId } = req.body;
     const lostReportId = req.params.id;
 
-    const match = await prisma.matchSuggestion.create({
-      data: {
-        confidenceScore: 1.0,
+    const [lostReport, foundReport] = await Promise.all([
+      prisma.itemReport.findUnique({ where: { id: lostReportId } }),
+      prisma.itemReport.findUnique({ where: { id: foundReportId } })
+    ]);
+    if (!lostReport || !foundReport) return res.status(404).json({ message: "Item not found" });
+    if (lostReport.reportType !== "LOST" || foundReport.reportType !== "FOUND") {
+      return res.status(400).json({ message: "A match must connect one lost report and one found report" });
+    }
+
+    const match = await prisma.matchSuggestion.upsert({
+      where: { lostReportId_foundReportId: { lostReportId, foundReportId } },
+      create: {
+        totalScore: 100,
+        descriptionSimilarityScore: 100,
+        categoryScore: 100,
+        colorScore: 100,
+        locationScore: 100,
+        dateScore: 100,
+        confidence: "HIGH",
+        reasons: ["Manually confirmed by staff"],
+        status: "CONFIRMED",
         matchSource: "MANUAL_STAFF",
+        reviewerId: req.user.id,
+        reviewedAt: new Date(),
         lostReportId,
         foundReportId
+      },
+      update: {
+        status: "CONFIRMED",
+        matchSource: "MANUAL_STAFF",
+        reviewerId: req.user.id,
+        reviewedAt: new Date()
       }
     });
 
