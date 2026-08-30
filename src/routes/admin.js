@@ -1,8 +1,7 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
-const bcrypt = require("bcryptjs");
-const { isValidPassword } = require("../utils/password");
+const { normalizeEmail, isAuEmail } = require("../utils/studentEmail");
 
 const router = express.Router();
 
@@ -32,14 +31,15 @@ router.get("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) =
 // POST /api/admin/users (Admin)
 router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
-    const { email, name, password, roleName = "STAFF" } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const roleName = req.body?.roleName || "STAFF";
     
-    if (!email || !name || !password) {
+    if (!isAuEmail(email) || !name) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
-    
-    if (!isValidPassword(password)) {
-      return res.status(400).json({ success: false, message: "Password does not meet requirements" });
+    if (!new Set(["STUDENT", "STAFF", "ADMIN"]).has(roleName)) {
+      return res.status(400).json({ success: false, message: "Invalid role" });
     }
     
     const existingUser = await prisma.user.findFirst({
@@ -50,13 +50,10 @@ router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) 
       return res.status(400).json({ success: false, message: "User with this email already exists" });
     }
     
-    const hashedPassword = await bcrypt.hash(password, 12);
-    
     const user = await prisma.user.create({
       data: {
         universityEmail: email,
         fullName: name,
-        passwordHash: hashedPassword,
         isActive: true,
         role: { connect: { name: roleName } }
       },
@@ -125,18 +122,18 @@ router.patch("/users/:id/role", authenticate, allowRoles("ADMIN"), async (req, r
 router.patch("/users/:id/status", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
     const { isActive } = req.body;
-    
+
     // Prevent admin from deactivating their own account
     if (req.params.id === req.user.id) {
       return res.status(400).json({ success: false, message: "You cannot deactivate your own account" });
     }
-    
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { isActive },
       include: { role: true }
     });
-    
+
     await prisma.auditLog.create({
       data: {
         action: "UPDATE_USER_STATUS",
@@ -146,7 +143,7 @@ router.patch("/users/:id/status", authenticate, allowRoles("ADMIN"), async (req,
         actorUserId: req.user.id
       }
     });
-    
+
     res.json({
       id: user.id,
       email: user.universityEmail,
@@ -175,12 +172,12 @@ router.get("/categories", authenticate, allowRoles("ADMIN"), async (req, res, ne
 router.patch("/categories/:id/status", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
     const { isActive } = req.body;
-    
+
     const category = await prisma.itemCategory.update({
       where: { id: req.params.id },
       data: { isActive }
     });
-    
+
     await prisma.auditLog.create({
       data: {
         action: "UPDATE_CATEGORY_STATUS",
@@ -190,7 +187,7 @@ router.patch("/categories/:id/status", authenticate, allowRoles("ADMIN"), async 
         actorUserId: req.user.id
       }
     });
-    
+
     res.json(category);
   } catch (error) {
     next(error);
