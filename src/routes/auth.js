@@ -167,4 +167,25 @@ router.get("/me", authenticate, (req, res) => {
   return res.status(200).json({ user: req.user });
 });
 
+router.post("/dev/switch-role", authenticate, async (req, res, next) => {
+  if (isProduction) return res.status(403).json({ error: "Not allowed in production" });
+  try {
+    const { roleName } = req.body;
+    if (!applicationRoles.has(roleName)) return res.status(400).json({ error: "Invalid role" });
+
+    const roleRecord = await prisma.role.findUnique({ where: { name: roleName } });
+    if (!roleRecord) return res.status(400).json({ error: "Role not found in DB" });
+
+    const updatedUser = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { roleId: roleRecord.id },
+      include: { role: true }
+    });
+
+    res.json({ message: "Role updated", user: safeUser(updatedUser) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

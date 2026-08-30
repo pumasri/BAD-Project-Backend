@@ -169,6 +169,32 @@ router.get("/categories", authenticate, allowRoles("ADMIN"), async (req, res, ne
   }
 });
 
+// PATCH /api/admin/categories/:id (Admin)
+router.patch("/categories/:id", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  try {
+    const { name, description } = req.body;
+    
+    const category = await prisma.itemCategory.update({
+      where: { id: req.params.id },
+      data: { name, description }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        action: "UPDATE_CATEGORY",
+        entityType: "ItemCategory",
+        entityId: category.id,
+        details: { name, description },
+        actorUserId: req.user.id
+      }
+    });
+
+    res.json(category);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // PATCH /api/admin/categories/:id/status (Admin)
 router.patch("/categories/:id/status", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
