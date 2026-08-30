@@ -158,6 +158,38 @@ test("report creation succeeds and queues failure-isolated matching", async () =
   assert.deepEqual(queuedReports, ["created-report"]);
 });
 
+test("students can create only lost reports and staff can create only found reports", async () => {
+  const payload = {
+    title: "Role test item",
+    description: "Role test description",
+    categoryId: "keys",
+    location: "Library",
+    occurredAt: "2026-08-20T10:00:00Z"
+  };
+
+  const studentFoundResponse = await request("/api/items", {
+    method: "POST",
+    headers: { ...headers("STUDENT"), "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, reportType: "FOUND" })
+  });
+  assert.equal(studentFoundResponse.status, 403);
+
+  const staffLostResponse = await request("/api/items", {
+    method: "POST",
+    headers: { ...headers("STAFF"), "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, reportType: "LOST" })
+  });
+  assert.equal(staffLostResponse.status, 403);
+
+  const staffFoundResponse = await request("/api/items", {
+    method: "POST",
+    headers: { ...headers("STAFF"), "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, reportType: "FOUND" })
+  });
+  assert.equal(staffFoundResponse.status, 201);
+  assert.deepEqual(queuedReports, ["created-report"]);
+});
+
 test("student sees only safe matches for their own lost report", async () => {
   const response = await request("/api/items/lost-1/matches", { headers: headers("STUDENT") });
   const body = await response.json();

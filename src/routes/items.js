@@ -119,16 +119,27 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-// POST /api/items (Student, Staff)
+// POST /api/items (Students create LOST reports; staff create FOUND reports)
 router.post("/", authenticate, allowRoles("STUDENT", "STAFF"), async (req, res, next) => {
   try {
     const { title, description, reportType, categoryId, location, occurredAt, color, brand, isPublic } = req.body;
+    const normalizedReportType = typeof reportType === "string" ? reportType.trim().toUpperCase() : "";
+
+    if (!['LOST', 'FOUND'].includes(normalizedReportType)) {
+      return res.status(400).json({ message: "reportType must be LOST or FOUND" });
+    }
+    if (req.user.role === "STUDENT" && normalizedReportType !== "LOST") {
+      return res.status(403).json({ message: "Students can create only lost-item reports" });
+    }
+    if (req.user.role === "STAFF" && normalizedReportType !== "FOUND") {
+      return res.status(403).json({ message: "Staff can create only found-item reports" });
+    }
     
     const item = await prisma.itemReport.create({
       data: {
         title,
         description,
-        reportType,
+        reportType: normalizedReportType,
         categoryId,
         location,
         occurredAt: new Date(occurredAt),
