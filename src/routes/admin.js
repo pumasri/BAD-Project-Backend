@@ -88,11 +88,15 @@ router.post("/users", authenticate, allowRoles("ADMIN"), async (req, res, next) 
 // PATCH /api/admin/users/:id/role (Admin)
 router.patch("/users/:id/role", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
   try {
-    const { roleId } = req.body;
+    const { roleId, roleName } = req.body;
     
+    let updateData = {};
+    if (roleId) updateData.roleId = roleId;
+    else if (roleName) updateData.role = { connect: { name: roleName } };
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
-      data: { roleId },
+      data: updateData,
       include: { role: true }
     });
     
