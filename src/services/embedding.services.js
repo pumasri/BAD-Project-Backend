@@ -120,12 +120,21 @@ async function generateEmbedding(report, options = {}) {
       model,
       fingerprint: createEmbeddingFingerprint(report, model)
     };
-  } catch (error) {
-    if (error?.code?.startsWith?.("EMBEDDING_")) throw error;
-    const safeError = new Error("Embedding generation failed");
-    safeError.code = safeEmbeddingErrorCode(error);
-    throw safeError;
-  }
+
+} catch (error) {
+  console.error("Gemini embedding error:", {
+    status: error?.status,
+    code: error?.code,
+    message: error?.message,
+  });
+
+  if (error?.code?.startsWith?.("EMBEDDING_")) throw error;
+
+  const safeError = new Error("Embedding generation failed");
+  safeError.code = safeEmbeddingErrorCode(error);
+  throw safeError;
+}
+
 }
 
 module.exports = {

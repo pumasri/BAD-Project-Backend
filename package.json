@@ -26,6 +26,9 @@
   "homepage": "https://github.com/pumasri/BAD-Project-Backend#readme",
   "description": "",
   "dependencies": {
+    "@azure/identity": "^4.13.2",
+    "@azure/keyvault-secrets": "^4.11.2",
+    "@google/genai": "^2.19.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.9.0",
