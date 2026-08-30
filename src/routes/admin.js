@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
 const { normalizeEmail, isAuEmail } = require("../utils/studentEmail");
+const { parsePositiveLimit, toSyncedPeerItem } = require("../services/partnerSync");
 
 const router = express.Router();
 
@@ -223,13 +224,50 @@ router.get("/partners", authenticate, allowRoles("ADMIN"), async (req, res, next
         baseUrl: true,
         apiKeyIdentifier: true,
         isActive: true,
-        createdAt: true
+        createdAt: true,
+        _count: { select: { syncedItems: true } },
+        syncEvents: {
+          select: { createdAt: true, receivedCount: true, createdCount: true, updatedCount: true, deactivatedCount: true },
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
       }
     });
-    
-    res.json(partners);
+
+    res.json(partners.map(({ _count, syncEvents, ...partner }) => ({
+      ...partner,
+      syncedItemCount: _count.syncedItems,
+      lastSync: syncEvents[0] || null
+    })));
   } catch (error) {
     next(error);
+  }
+});
+
+// GET /api/admin/partners/:id/synced-items (Admin)
+// This is the local, authenticated view of inventory received from a partner.
+router.get("/partners/:id/synced-items", authenticate, allowRoles("ADMIN"), async (req, res, next) => {
+  const parsedLimit = parsePositiveLimit(req.query.limit);
+  if (!parsedLimit.success) {
+    return res.status(400).json({ success: false, message: parsedLimit.message });
+  }
+
+  try {
+    const partner = await prisma.partnerClient.findUnique({ where: { id: req.params.id } });
+    if (!partner) return res.status(404).json({ success: false, message: "Partner not found" });
+
+    const items = await prisma.partnerSyncedItem.findMany({
+      where: { partnerId: partner.id, isActive: true },
+      orderBy: [{ remoteUpdatedAt: "desc" }, { updatedAt: "desc" }],
+      take: parsedLimit.value
+    });
+    return res.json({
+      partner: { id: partner.id, name: partner.name },
+      items: items.map(toSyncedPeerItem),
+      count: items.length
+    });
+  } catch (error) {
+    return next(error);
   }
 });
 
