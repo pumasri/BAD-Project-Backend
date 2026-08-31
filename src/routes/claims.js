@@ -1,26 +1,10 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
-const multer = require("multer");
-const path = require("path");
 const fs = require("fs");
+const { imageUpload } = require("../middleware/imageUpload");
 
 const router = express.Router();
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
-});
 
 // POST /api/claims (Student)
 router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => {
@@ -90,7 +74,7 @@ router.post("/", authenticate, allowRoles("STUDENT"), async (req, res, next) => 
 });
 
 // POST /api/claims/:id/evidence (Student)
-router.post("/:id/evidence", authenticate, allowRoles("STUDENT"), upload.single("image"), async (req, res, next) => {
+router.post("/:id/evidence", authenticate, allowRoles("STUDENT"), imageUpload.single("image"), async (req, res, next) => {
   try {
     const claim = await prisma.claimRequest.findUnique({
       where: { id: req.params.id }

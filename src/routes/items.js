@@ -1,27 +1,11 @@
 const express = require("express");
 const prisma = require("../config/prisma");
 const { authenticate, allowRoles } = require("../middleware/auth");
-const multer = require("multer");
-const path = require("path");
 const fs = require("fs");
+const { imageUpload } = require("../middleware/imageUpload");
 const { queueMatchingForReport, runMatchingForReport } = require("../services/matching.service");
 
 const router = express.Router();
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
-});
 
 // GET /api/items (Public/Student/Staff)
 router.get("/", async (req, res, next) => {
@@ -119,16 +103,27 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
-// POST /api/items (Student, Staff)
+// POST /api/items (Students create LOST reports; staff create FOUND reports)
 router.post("/", authenticate, allowRoles("STUDENT", "STAFF"), async (req, res, next) => {
   try {
     const { title, description, reportType, categoryId, location, occurredAt, color, brand, isPublic } = req.body;
+    const normalizedReportType = typeof reportType === "string" ? reportType.trim().toUpperCase() : "";
+
+    if (!['LOST', 'FOUND'].includes(normalizedReportType)) {
+      return res.status(400).json({ message: "reportType must be LOST or FOUND" });
+    }
+    if (req.user.role === "STUDENT" && normalizedReportType !== "LOST") {
+      return res.status(403).json({ message: "Students can create only lost-item reports" });
+    }
+    if (req.user.role === "STAFF" && normalizedReportType !== "FOUND") {
+      return res.status(403).json({ message: "Staff can create only found-item reports" });
+    }
     
     const item = await prisma.itemReport.create({
       data: {
         title,
         description,
-        reportType,
+        reportType: normalizedReportType,
         categoryId,
         location,
         occurredAt: new Date(occurredAt),
@@ -156,7 +151,7 @@ router.post("/", authenticate, allowRoles("STUDENT", "STAFF"), async (req, res, 
 });
 
 // POST /api/items/:id/images (Student, Staff)
-router.post("/:id/images", authenticate, allowRoles("STUDENT", "STAFF"), upload.single("image"), async (req, res, next) => {
+router.post("/:id/images", authenticate, allowRoles("STUDENT", "STAFF"), imageUpload.single("image"), async (req, res, next) => {
   try {
     const item = await prisma.itemReport.findUnique({
       where: { id: req.params.id }
