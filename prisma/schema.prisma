@@ -246,4 +246,50 @@ model PartnerClient {
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  syncedItems PartnerSyncedItem[]
+  syncEvents  PartnerSyncEvent[]
+}
+
+// Partner-owned public inventory. It intentionally has no relation to local
+// users, claims, evidence, images, or ItemReport records.
+model PartnerSyncedItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  externalId      String
+  title           String
+  category        String?
+  location        String
+  occurredAt      DateTime
+  status          String   @default("OPEN")
+  sourceUrl       String?
+  remoteUpdatedAt DateTime?
+  lastSyncedAt    DateTime @default(now())
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  partnerId String        @db.Uuid
+  partner   PartnerClient @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, externalId])
+  @@index([partnerId, status])
+  @@index([partnerId, category])
+  @@index([partnerId, location])
+}
+
+// Audit records for API-key based exchanges cannot use AuditLog because they
+// have no local user actor. They still retain partner, timing, and batch data.
+model PartnerSyncEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  operation     String
+  receivedCount Int
+  createdCount  Int
+  updatedCount  Int
+  deactivatedCount Int
+  createdAt     DateTime @default(now())
+
+  partnerId String        @db.Uuid
+  partner   PartnerClient @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId, createdAt])
 }
