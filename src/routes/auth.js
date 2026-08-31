@@ -124,12 +124,20 @@ router.get("/microsoft/callback", loginRateLimit, async (req, res) => {
     });
     return res.redirect(302, frontendLoginUrl({ microsoft_handoff: handoff }));
   } catch (error) {
-    console.warn("Microsoft callback failed", {
+    const diagnostic = {
       stage: authenticationStage,
-      category: error.code || error.name || "UNKNOWN_ERROR"
+      category: error.code || error.name || "UNKNOWN_ERROR",
+      oauthError: error.error || error.cause?.error,
+      cause: error.cause?.code || error.cause?.name
+    };
+    Object.keys(diagnostic).forEach((key) => {
+      if (!diagnostic[key]) delete diagnostic[key];
     });
+    console.warn("Microsoft callback failed", diagnostic);
     const reason = error.code === "MICROSOFT_ACCOUNT_INACTIVE"
       ? "account_inactive"
+      : authenticationStage === "user_provisioning"
+        ? "account_setup_failed"
       : "authentication_failed";
     return res.redirect(302, frontendLoginUrl({ microsoft_error: reason }));
   }

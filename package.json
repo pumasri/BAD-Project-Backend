@@ -1,7 +1,6 @@
 {
   "name": "bad-project-backend",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
@@ -29,14 +28,12 @@
     "@azure/identity": "^4.13.2",
     "@azure/keyvault-secrets": "^4.11.2",
     "@google/genai": "^2.19.0",
-    "@google/generative-ai": "^0.24.1",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.9.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "jose": "^6.2.10",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.11.0",
     "multer": "^2.2.0",

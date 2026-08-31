@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-const path = require("path");
+const { uploadsDirectory } = require("./middleware/imageUpload");
 
 const apiRoutes = require("./routes");
 const errorHandler = require("./middleware/errorHandler");
@@ -16,7 +16,7 @@ app.use(helmet({
 app.use(cors({ origin: frontendUrl }));
 app.use(express.json());
 app.use(morgan("dev"));
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+app.use("/uploads", express.static(uploadsDirectory));
 
 app.get("/", (req, res) => {
   res.status(200).json({
