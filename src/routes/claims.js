@@ -117,6 +117,34 @@ router.post("/:id/evidence", authenticate, allowRoles("STUDENT"), imageUpload.si
   }
 });
 
+// PATCH /api/claims/:id/more-information (Student)
+router.patch("/:id/more-information", authenticate, allowRoles("STUDENT"), async (req, res, next) => {
+  try {
+    const identifyingDetails = typeof req.body?.identifyingDetails === "string"
+      ? req.body.identifyingDetails.trim()
+      : "";
+    if (!identifyingDetails) {
+      return res.status(400).json({ message: "Additional ownership details are required" });
+    }
+
+    const claim = await prisma.claimRequest.findUnique({ where: { id: req.params.id } });
+    if (!claim) return res.status(404).json({ message: "Claim not found" });
+    if (claim.claimantUserId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+    if (claim.status !== "MORE_INFORMATION_REQUIRED") {
+      return res.status(400).json({ message: "This claim is not waiting for more information" });
+    }
+
+    const updatedClaim = await prisma.claimRequest.update({
+      where: { id: claim.id },
+      data: { identifyingDetails, status: "PENDING", reviewNote: null, reviewedByUserId: null },
+      include: { evidence: true }
+    });
+    res.json(updatedClaim);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/claims/my (Student)
 router.get("/my", authenticate, allowRoles("STUDENT"), async (req, res, next) => {
   try {

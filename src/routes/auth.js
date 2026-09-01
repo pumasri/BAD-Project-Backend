@@ -184,13 +184,26 @@ router.post("/dev/switch-role", authenticate, async (req, res, next) => {
     const roleRecord = await prisma.role.findUnique({ where: { name: roleName } });
     if (!roleRecord) return res.status(400).json({ error: "Role not found in DB" });
 
-    const updatedUser = await prisma.user.update({
-      where: { id: req.user.id },
-      data: { roleId: roleRecord.id },
+    // Keep dev personas separate. Mutating the current user made items created
+    // as STAFF appear to have been reported by the STUDENT after switching
+    // roles, which correctly blocked that student from claiming them.
+    const devEmail = `dev-${roleName.toLowerCase()}@campus.local`;
+    const devUser = await prisma.user.upsert({
+      where: { universityEmail: devEmail },
+      update: { roleId: roleRecord.id, isActive: true },
+      create: {
+        universityEmail: devEmail,
+        fullName: `Development ${roleName}`,
+        roleId: roleRecord.id
+      },
       include: { role: true }
     });
 
-    res.json({ message: "Role updated", user: safeUser(updatedUser) });
+    res.json({
+      message: "Development role switched",
+      token: createToken(devUser),
+      user: safeUser(devUser)
+    });
   } catch (error) {
     next(error);
   }
