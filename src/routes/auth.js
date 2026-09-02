@@ -18,9 +18,19 @@ const router = express.Router();
 const isProduction = process.env.NODE_ENV === "production";
 const applicationRoles = new Set(["STUDENT", "STAFF", "ADMIN"]);
 const sensitiveEndpointMessage = "Too many attempts. Please try again later.";
-const loginRateLimit = createRateLimit({
+// Only the user-initiated start should consume the normal login-attempt budget.
+// The callback and handoff exchange are separate OAuth steps; sharing one
+// counter across all three steps made a single sign-in consume three attempts,
+// which could block users on shared university/proxy IP addresses.
+const loginStartRateLimit = createRateLimit({
   windowMs: 15 * 60 * 1000,
   max: isProduction ? 10 : 100,
+  message: sensitiveEndpointMessage
+});
+
+const oauthCompletionRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProduction ? 30 : 300,
   message: sensitiveEndpointMessage
 });
 
@@ -93,7 +103,7 @@ async function findOrProvisionMicrosoftUser(identity) {
   return user;
 }
 
-router.get("/microsoft", loginRateLimit, async (req, res) => {
+router.get("/microsoft", loginStartRateLimit, async (req, res) => {
   try {
     const authorization = await createAuthorizationRequest(req.query.redirect);
     res.setHeader("Set-Cookie", authorization.cookie);
@@ -109,7 +119,7 @@ router.get("/microsoft", loginRateLimit, async (req, res) => {
   }
 });
 
-router.get("/microsoft/callback", loginRateLimit, async (req, res) => {
+router.get("/microsoft/callback", oauthCompletionRateLimit, async (req, res) => {
   res.setHeader("Set-Cookie", clearTransactionCookie());
   let authenticationStage = "authorization";
   try {
@@ -143,7 +153,7 @@ router.get("/microsoft/callback", loginRateLimit, async (req, res) => {
   }
 });
 
-router.post("/microsoft/exchange", loginRateLimit, (req, res) => {
+router.post("/microsoft/exchange", oauthCompletionRateLimit, (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const code = typeof req.body?.code === "string" ? req.body.code : "";
   if (!code || code.length > 256) {
