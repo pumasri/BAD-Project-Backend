@@ -4,6 +4,7 @@ const { authenticate, allowRoles } = require("../middleware/auth");
 const fs = require("fs");
 const { imageUpload } = require("../middleware/imageUpload");
 const { queueMatchingForReport, runMatchingForReport } = require("../services/matching.service");
+const { checkMedicineBoxAvailability } = require("../services/medicineBox.service");
 
 const router = express.Router();
 
@@ -78,6 +79,102 @@ router.post("/:id/matches/run", authenticate, allowRoles("STAFF", "ADMIN"), asyn
     return res.status(200).json({ matches });
   } catch (error) {
     if (error.code === "REPORT_NOT_FOUND") return res.status(404).json({ message: "Item not found" });
+    return next(error);
+  }
+});
+
+function medicineBoxCheckResponse(check) {
+  return {
+    id: check.id,
+    status: check.status,
+    supportLocation: check.supportLocation,
+    message: check.message,
+    checkedAt: check.checkedAt
+  };
+}
+
+// GET /api/items/:id/medicine-box-checks (Staff/Admin)
+// Returns only the safe fields retained from previous partner lookups.
+router.get("/:id/medicine-box-checks", authenticate, allowRoles("STAFF", "ADMIN"), async (req, res, next) => {
+  try {
+    const item = await prisma.itemReport.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!item) return res.status(404).json({ message: "Item not found" });
+
+    const checks = await prisma.medicineBoxCheck.findMany({
+      where: { itemReportId: item.id },
+      orderBy: { checkedAt: "desc" },
+      take: 5
+    });
+    return res.json(checks.map(medicineBoxCheckResponse));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// POST /api/items/:id/medicine-box-check (Staff/Admin)
+// The partner receives only its agreed category filter. Private descriptions,
+// users, claims, evidence, uploads, and the partner key never leave this backend.
+router.post("/:id/medicine-box-check", authenticate, allowRoles("STAFF", "ADMIN"), async (req, res, next) => {
+  try {
+    const item = await prisma.itemReport.findUnique({
+      where: { id: req.params.id },
+      include: { category: { select: { name: true } } }
+    });
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    if (item.reportType !== "FOUND") {
+      return res.status(400).json({ message: "Medicine Box checks are available for found-item reports only" });
+    }
+
+    let result;
+    try {
+      result = await checkMedicineBoxAvailability(item);
+    } catch (error) {
+      const message = error?.code === "MEDICINE_BOX_NOT_CONFIGURED"
+        ? "Medicine Box integration is not configured."
+        : "Medicine Box service is temporarily unavailable. Please try again.";
+      const check = await prisma.medicineBoxCheck.create({
+        data: {
+          status: "ERROR",
+          message,
+          itemReportId: item.id,
+          checkedByUserId: req.user.id
+        }
+      });
+      await prisma.auditLog.create({
+        data: {
+          action: "CHECK_MEDICINE_BOX",
+          entityType: "ItemReport",
+          entityId: item.id,
+          details: { status: check.status },
+          actorUserId: req.user.id
+        }
+      });
+      return res.status(error?.code === "MEDICINE_BOX_NOT_CONFIGURED" ? 503 : 502).json({
+        success: false,
+        message,
+        check: medicineBoxCheckResponse(check)
+      });
+    }
+
+    const check = await prisma.medicineBoxCheck.create({
+      data: {
+        ...result,
+        itemReportId: item.id,
+        checkedByUserId: req.user.id
+      }
+    });
+    await prisma.auditLog.create({
+      data: {
+        action: "CHECK_MEDICINE_BOX",
+        entityType: "ItemReport",
+        entityId: item.id,
+        details: { status: check.status },
+        actorUserId: req.user.id
+      }
+    });
+
+    return res.status(200).json({ success: true, check: medicineBoxCheckResponse(check) });
+  } catch (error) {
     return next(error);
   }
 });

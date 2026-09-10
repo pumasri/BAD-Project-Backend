@@ -85,6 +85,7 @@ model User {
   submittedClaims ClaimRequest[]    @relation("ClaimantClaims")
   reviewedClaims  ClaimRequest[]    @relation("ReviewerClaims")
   reviewedMatches MatchSuggestion[] @relation("MatchReviewer")
+  medicineBoxChecks MedicineBoxCheck[] @relation("MedicineBoxCheckedBy")
   auditLogs       AuditLog[]
 
   @@index([roleId])
@@ -132,6 +133,7 @@ model ItemReport {
   lostMatchSuggestions  MatchSuggestion[] @relation("LostReportMatches")
   foundMatchSuggestions MatchSuggestion[] @relation("FoundReportMatches")
   claims                ClaimRequest[]
+  medicineBoxChecks     MedicineBoxCheck[]
 
   @@index([createdById])
   @@index([categoryId])
@@ -234,6 +236,24 @@ model AuditLog {
   @@index([actorUserId, createdAt])
   @@index([entityType, entityId])
   @@index([action])
+}
+
+// Minimal audit trail for a staff/admin Medicine Box lookup. It deliberately
+// excludes API keys, raw responses, and private report details.
+model MedicineBoxCheck {
+  id              String   @id @default(uuid()) @db.Uuid
+  status          String
+  supportLocation String?
+  message         String?
+  checkedAt       DateTime @default(now())
+
+  itemReportId    String @db.Uuid
+  checkedByUserId String @db.Uuid
+  itemReport      ItemReport @relation(fields: [itemReportId], references: [id], onDelete: Restrict)
+  checkedBy       User @relation("MedicineBoxCheckedBy", fields: [checkedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([itemReportId, checkedAt])
+  @@index([checkedByUserId, checkedAt])
 }
 
 model PartnerClient {

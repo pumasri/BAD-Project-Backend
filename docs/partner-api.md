@@ -96,3 +96,18 @@ It supports optional `limit`, `q` (title/location text), `category`, and
 Administrators can inspect a partner's stored public inventory through
 `GET /api/admin/partners/:id/synced-items?limit=50`. The Admin API Integrations
 page also shows stored-item counts and the latest sync time.
+
+## Medicine Box API consumed by this backend
+
+For the Medicine Box peer integration, this backend calls the partner's
+protected endpoint with the partner-issued key:
+
+```http
+GET /api/peer/clinic/medicines/availability?category=First-Aid
+x-api-key: <medicine-box-issued-key>
+```
+
+The key is server-side only. The current partner contract accepts only the
+`category` filter, so no Lost & Found user, claim, image, description,
+location, or report date is sent. The backend retains only a safe availability
+status and staff-facing summary; it never stores a raw Medicine Box response.
