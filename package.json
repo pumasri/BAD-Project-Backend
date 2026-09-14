@@ -10,7 +10,9 @@
     "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "seed:demo": "tsx scripts/seedDemoData.ts"
+    "seed:demo": "tsx scripts/seedDemoData.ts",
+    "seed:showcase": "tsx scripts/seedShowcaseData.ts",
+    "seed:final": "tsx scripts/seedfinal.ts"
   },
   "repository": {
     "type": "git",
