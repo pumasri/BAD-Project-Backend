@@ -11,7 +11,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
     "seed:demo": "tsx scripts/seedDemoData.ts",
-    "seed:peer-demo": "tsx scripts/seedPeerDemoData.ts"
+    "seed:peer-demo": "tsx scripts/seedPeerDemoData.ts",
+    "seed:showcase": "tsx scripts/seedShowcaseData.ts",
+    "seed:final": "tsx scripts/seedfinal.ts"
   },
   "repository": {
     "type": "git",
