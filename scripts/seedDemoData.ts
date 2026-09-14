@@ -23,6 +23,10 @@ if (!demoUserEmail) {
   );
 }
 
+if (process.env.NODE_ENV === "production") {
+  throw new Error("Cannot run demo seed in production environment.");
+}
+
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 async function upsertReport(data: {
