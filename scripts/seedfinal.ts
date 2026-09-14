@@ -128,7 +128,7 @@ const categoryNames = [
 ] as const;
 
 const reportAccounts = {
-  admin: "u663003@au.edu", // Phanthira Kositjaroenkul
+  admin: "u6630003@au.edu", // Phanthira Kositjaroenkul
   student: "u6620025@au.edu", // Chanyanut Pumasri
   staff: "u6612119@au.edu", // Aung Hlaing Htwe
 } as const;
