@@ -10,6 +10,16 @@ let queuedReports = [];
 let reports;
 let matchRecords;
 
+function reportMatchesWhere(report, where) {
+  if (!where) return true;
+  if (where.AND && !where.AND.every((filter) => reportMatchesWhere(report, filter))) return false;
+  if (where.OR && !where.OR.some((filter) => reportMatchesWhere(report, filter))) return false;
+  return Object.entries(where).every(([key, value]) => {
+    if (key === "AND" || key === "OR") return true;
+    return report[key] === value;
+  });
+}
+
 function baseReport(overrides = {}) {
   return {
     id: "lost-1",
@@ -40,7 +50,7 @@ const fakePrisma = {
       return value;
     },
     update: async ({ where, data }) => Object.assign(reports.get(where.id), data),
-    findMany: async () => [...reports.values()]
+    findMany: async ({ where }) => [...reports.values()].filter((report) => reportMatchesWhere(report, where))
   },
   matchSuggestion: {
     findMany: async ({ where }) => matchRecords.filter((match) =>
@@ -73,6 +83,11 @@ require.cache[authPath] = {
       const role = req.headers["x-test-role"];
       if (!role) return res.status(401).json({ message: "Authentication is required" });
       req.user = { id: req.headers["x-test-user"] || ownerId, role };
+      return next();
+    },
+    optionalAuthenticate: (req, _res, next) => {
+      const role = req.headers["x-test-role"];
+      if (role) req.user = { id: req.headers["x-test-user"] || ownerId, role };
       return next();
     },
     allowRoles: (...roles) => (req, res, next) =>
@@ -121,11 +136,19 @@ test.beforeEach(() => {
   const found = baseReport({
     id: "found-1",
     title: "Found wallet",
+    description: "Public found wallet description",
     reportType: "FOUND",
     createdById: otherId,
     occurredAt: new Date("2026-08-21T10:00:00Z")
   });
-  reports = new Map([[lost.id, lost], [found.id, found]]);
+  const privateFound = baseReport({
+    id: "private-found-1",
+    title: "Private found wallet",
+    reportType: "FOUND",
+    isPublic: false,
+    createdById: otherId
+  });
+  reports = new Map([[lost.id, lost], [found.id, found], [privateFound.id, privateFound]]);
   matchRecords = [{
     id: "match-1",
     lostReportId: lost.id,
@@ -139,6 +162,35 @@ test.beforeEach(() => {
     reviewedAt: null,
     reviewerId: null
   }];
+});
+
+test("anonymous item requests expose only public found items without reporter details", async () => {
+  const listResponse = await request("/api/items");
+  const list = await listResponse.json();
+
+  assert.equal(listResponse.status, 200);
+  assert.deepEqual(list.map((item) => item.id), ["found-1"]);
+  assert.equal("createdBy" in list[0], false);
+  assert.equal("createdById" in list[0], false);
+  assert.equal(JSON.stringify(list).includes("Private detailed description"), false);
+
+  assert.equal((await request("/api/items/lost-1")).status, 404);
+  assert.equal((await request("/api/items/private-found-1")).status, 404);
+
+  const publicDetail = await request("/api/items/found-1");
+  const publicItem = await publicDetail.json();
+  assert.equal(publicDetail.status, 200);
+  assert.equal("createdBy" in publicItem, false);
+  assert.equal("createdById" in publicItem, false);
+});
+
+test("a signed-in student can still read their own lost report", async () => {
+  const response = await request("/api/items", { headers: headers("STUDENT") });
+  const items = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(items.map((item) => item.id).sort(), ["found-1", "lost-1"]);
+  assert.equal((await request("/api/items/lost-1", { headers: headers("STUDENT") })).status, 200);
 });
 
 test("report creation succeeds and queues failure-isolated matching", async () => {

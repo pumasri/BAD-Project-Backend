@@ -61,6 +61,14 @@ async function authenticate(req, res, next) {
   }
 }
 
+// Public read endpoints can use this middleware to recognise a signed-in user
+// without making a token mandatory. If a caller supplies a token, it must still
+// be valid; an invalid token must not silently become anonymous access.
+function optionalAuthenticate(req, res, next) {
+  if (!req.headers.authorization) return next();
+  return authenticate(req, res, next);
+}
+
 function allowRoles(...allowedRoles) {
   return function checkRole(req, res, next) {
     if (!req.user) {
@@ -83,5 +91,6 @@ function allowRoles(...allowedRoles) {
 
 module.exports = {
   authenticate,
+  optionalAuthenticate,
   allowRoles
 };

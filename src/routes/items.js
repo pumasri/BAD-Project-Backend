@@ -1,34 +1,64 @@
 const express = require("express");
 const prisma = require("../config/prisma");
-const { authenticate, allowRoles } = require("../middleware/auth");
+const { authenticate, optionalAuthenticate, allowRoles } = require("../middleware/auth");
 const fs = require("fs");
 const { imageUpload } = require("../middleware/imageUpload");
 const { queueMatchingForReport, runMatchingForReport } = require("../services/matching.service");
 
 const router = express.Router();
+const publicFoundItemFilter = { isPublic: true, reportType: "FOUND" };
 
-// GET /api/items (Public/Student/Staff)
-router.get("/", async (req, res, next) => {
+function canReadItem(user, item) {
+  if (!user) {
+    return item.isPublic && item.reportType === "FOUND";
+  }
+  if (user.role === "STAFF" || user.role === "ADMIN") return true;
+  return item.createdById === user.id || (item.isPublic && item.reportType === "FOUND");
+}
+
+function withoutReporterDetails(item) {
+  const { createdBy, createdById, ...publicItem } = item;
+  return publicItem;
+}
+
+// GET /api/items
+// Anonymous visitors can see only public found-item listings. Signed-in
+// students can additionally see their own reports; staff and admins can see
+// all reports required to operate the service.
+router.get("/", optionalAuthenticate, async (req, res, next) => {
   try {
     const { type, status, category } = req.query;
-    const where = {};
-    if (type) where.reportType = type.toUpperCase();
-    if (status) where.status = status.toUpperCase();
-    if (category) where.categoryId = category;
+    const filters = [];
+    if (type) filters.push({ reportType: type.toUpperCase() });
+    if (status) filters.push({ status: status.toUpperCase() });
+    if (category) filters.push({ categoryId: category });
+
+    if (!req.user) {
+      filters.push(publicFoundItemFilter);
+    } else if (req.user.role === "STUDENT") {
+      filters.push({
+        OR: [
+          { createdById: req.user.id },
+          publicFoundItemFilter
+        ]
+      });
+    }
+
+    const where = filters.length === 0 ? {} : { AND: filters };
     
     const items = await prisma.itemReport.findMany({
       where,
       include: {
         category: true,
-        createdBy: {
+        createdBy: req.user ? {
           select: { id: true, fullName: true, universityEmail: true }
-        },
+        } : false,
         images: true
       },
       orderBy: { reportedAt: 'desc' }
     });
     
-    res.json(items);
+    return res.json(req.user ? items : items.map(withoutReporterDetails));
   } catch (error) {
     next(error);
   }
@@ -82,22 +112,25 @@ router.post("/:id/matches/run", authenticate, allowRoles("STAFF", "ADMIN"), asyn
   }
 });
 
-// GET /api/items/:id (Public/Student/Staff)
-router.get("/:id", async (req, res, next) => {
+// GET /api/items/:id
+router.get("/:id", optionalAuthenticate, async (req, res, next) => {
   try {
     const item = await prisma.itemReport.findUnique({
       where: { id: req.params.id },
       include: {
         category: true,
-        createdBy: {
+        createdBy: req.user ? {
           select: { id: true, fullName: true, universityEmail: true }
-        },
+        } : false,
         images: true
       }
     });
     
-    if (!item) return res.status(404).json({ message: "Item not found" });
-    res.json(item);
+    // Return 404 rather than revealing that a private report exists.
+    if (!item || !canReadItem(req.user, item)) {
+      return res.status(404).json({ message: "Item not found" });
+    }
+    return res.json(req.user ? item : withoutReporterDetails(item));
   } catch (error) {
     next(error);
   }
