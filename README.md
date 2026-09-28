@@ -1,8 +1,5 @@
-I checked the linked repository and the current backend checkout. GitHub describes it as a “Lost and found management system.” [Repository](https://github.com/pumasri/BAD-Project-Backend)
 
-Copy the following into `README.md`:
 
-```markdown
 # Campus Lost & Found Backend
 
 Backend API for a university Lost and Found management system. The system allows students and staff to report lost or found items, submit claims, review possible matches, and manage item recovery securely.
@@ -282,4 +279,3 @@ The frontend application is maintained in a separate repository and communicates
 This project is intended for academic and educational use.
 ```
 
-I kept the README focused on the backend’s implemented features and current privacy rules, especially the restriction that anonymous users only receive public FOUND reports and no reporter details.
