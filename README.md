@@ -274,8 +274,5 @@ npm run seed:final
 
 The frontend application is maintained in a separate repository and communicates with this backend through the REST API.
 
-## License
 
-This project is intended for academic and educational use.
-```
 
